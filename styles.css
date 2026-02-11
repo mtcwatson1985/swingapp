@@ -1,0 +1,153 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1320;
+  --panel: #1a2238;
+  --panel-border: #2f3d5d;
+  --text: #ecf1ff;
+  --muted: #a3b3d9;
+  --accent: #2fd4b1;
+  --warn: #ffb703;
+}
+
+* {
+  box-sizing: border-box;
+  font-family: Inter, Segoe UI, Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #0f1320, #0a0d16);
+  color: var(--text);
+}
+
+header,
+footer {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+footer {
+  border-top: 1px solid var(--panel-border);
+  border-bottom: none;
+  color: var(--muted);
+}
+
+main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  padding: 1rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h2 {
+  margin-bottom: 0.75rem;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+input,
+select,
+button {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: #11192f;
+  color: var(--text);
+  padding: 0.55rem 0.6rem;
+}
+
+button {
+  cursor: pointer;
+  border-color: #4f638f;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button-row {
+  margin-top: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+#status {
+  margin-top: 0.8rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.video-grid,
+.replay-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.8rem;
+}
+
+video {
+  width: 100%;
+  max-height: 420px;
+  background: #05070d;
+  border: 1px solid #2a3350;
+  border-radius: 10px;
+}
+
+.editor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: end;
+  margin-bottom: 0.8rem;
+}
+
+.canvas-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px dashed #435682;
+  border-radius: 10px;
+}
+
+canvas {
+  width: 100%;
+  max-width: 960px;
+  background: #070b15;
+  display: block;
+}
+
+#measurements {
+  margin-top: 0.6rem;
+  color: var(--warn);
+}
