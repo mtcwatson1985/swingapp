@@ -37,6 +37,7 @@ Then open:
 
 - If phone/tablet says unreachable: keep server terminal running, verify same Wi-Fi, re-check host IP, disable VPN/Private Relay, and allow firewall/local network access.
 - If pairing fails: regenerate a fresh offer/answer pair and retry.
+- If camera dropdowns are empty or **Start Sender + Generate Offer** does nothing: confirm you opened via `http://localhost` or `https://` (secure context), allow camera permission, then press **Refresh Cameras** and retry.
 - On single-camera devices, second local view may be hidden.
 
 ## GitHub PR note

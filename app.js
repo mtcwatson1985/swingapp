@@ -65,13 +65,18 @@ const ui = {
   viewerOfferIn: document.getElementById('viewerOfferIn'),
   buildViewerAnswer: document.getElementById('buildViewerAnswer'),
   viewerAnswer: document.getElementById('viewerAnswer'),
-  copyViewerAnswer: document.getElementById('copyViewerAnswer')
+  copyViewerAnswer: document.getElementById('copyViewerAnswer'),
+  secureContextNote: document.getElementById('secureContextNote'),
+  settingsStatus: document.getElementById('settingsStatus')
 };
 
 const ctx = ui.analysisCanvas.getContext('2d');
 
 function setStatus(message) {
   ui.status.textContent = `Status: ${message}`;
+  if (ui.settingsStatus) {
+    ui.settingsStatus.textContent = `Status: ${message}`;
+  }
 }
 
 function switchView(target) {
@@ -92,6 +97,14 @@ function chooseSupportedMime() {
     'video/webm'
   ];
   return mimes.find((m) => MediaRecorder.isTypeSupported(m)) || '';
+}
+
+function browserSupportsCamera() {
+  return Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function browserSupportsWebRtc() {
+  return Boolean(window.RTCPeerConnection);
 }
 
 function addCameraOptions(select, devices) {
@@ -115,8 +128,10 @@ function addCameraOptions(select, devices) {
 }
 
 async function listCameras() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus('camera APIs unavailable in this browser');
+  if (!browserSupportsCamera()) {
+    setStatus('camera APIs unavailable in this browser/context');
+    if (ui.cameraA) ui.cameraA.innerHTML = '<option>Camera API unavailable</option>';
+    if (ui.cameraB) ui.cameraB.innerHTML = '<option>Camera API unavailable</option>';
     return;
   }
 
@@ -132,10 +147,15 @@ async function listCameras() {
     if (videos.length > 1) {
       ui.cameraA.value = videos[0].deviceId;
       ui.cameraB.value = videos[1].deviceId;
+      setStatus(`cameras ready (${videos.length} found)`);
+    } else if (videos.length === 1) {
+      ui.cameraA.value = videos[0].deviceId;
+      ui.cameraB.value = 'environment';
+      setStatus('one camera found; second view may be unavailable on this device');
     } else {
       ui.cameraA.value = 'environment';
       ui.cameraB.value = 'user';
-      setStatus('single-camera device detected, second view may mirror or remain unavailable');
+      setStatus('no labelled cameras found; using front/back presets');
     }
   } catch (error) {
     setStatus(`unable to enumerate cameras (${error.message})`);
@@ -411,6 +431,24 @@ function replayAtRate(rate) {
   setStatus(`replaying at ${rate}x`);
 }
 
+function updateCompatibilityHints() {
+  if (!ui.secureContextNote) return;
+
+  const secure = window.isSecureContext;
+  const cam = browserSupportsCamera();
+  const rtc = browserSupportsWebRtc();
+
+  if (!secure) {
+    ui.secureContextNote.textContent = 'This page is not in a secure context. Use https:// or localhost for camera and WebRTC access.';
+  } else if (!cam) {
+    ui.secureContextNote.textContent = 'Camera API is unavailable in this browser. Try Safari/Chrome and allow camera permissions.';
+  } else if (!rtc) {
+    ui.secureContextNote.textContent = 'WebRTC API unavailable in this browser, so sender/viewer pairing will not work.';
+  } else {
+    ui.secureContextNote.textContent = 'Compatibility check passed: camera + WebRTC APIs detected.';
+  }
+}
+
 function createPeerConnection() {
   const peer = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -451,6 +489,16 @@ function waitIceComplete(peer) {
 
 async function startSenderFlow() {
   try {
+    if (!browserSupportsCamera()) {
+      setStatus('cannot start sender: camera API unavailable');
+      return;
+    }
+    if (!browserSupportsWebRtc()) {
+      setStatus('cannot start sender: WebRTC API unavailable');
+      return;
+    }
+
+    ui.senderOffer.value = '';
     if (state.senderPeer) state.senderPeer.close();
     stopStream(state.senderStream);
 
@@ -469,6 +517,9 @@ async function startSenderFlow() {
     await state.senderPeer.setLocalDescription(offer);
     await waitIceComplete(state.senderPeer);
 
+    if (!state.senderPeer.localDescription) {
+      throw new Error('offer not generated (no localDescription)');
+    }
     ui.senderOffer.value = JSON.stringify(state.senderPeer.localDescription);
     setStatus('sender offer generated, copy to viewer device');
   } catch (error) {
@@ -482,6 +533,10 @@ async function applySenderAnswer() {
       setStatus('start sender first');
       return;
     }
+    if (!ui.senderAnswerIn.value.trim()) {
+      setStatus('paste viewer answer first');
+      return;
+    }
     const answer = JSON.parse(ui.senderAnswerIn.value);
     await state.senderPeer.setRemoteDescription(answer);
     setStatus('viewer answer applied, waiting for connection');
@@ -492,6 +547,11 @@ async function applySenderAnswer() {
 
 async function buildViewerAnswer() {
   try {
+    if (!browserSupportsWebRtc()) {
+      setStatus('cannot build viewer answer: WebRTC API unavailable');
+      return;
+    }
+
     if (state.viewerPeer) state.viewerPeer.close();
     state.viewerPeer = createPeerConnection();
 
@@ -508,6 +568,10 @@ async function buildViewerAnswer() {
       switchView('live');
     };
 
+    if (!ui.viewerOfferIn.value.trim()) {
+      setStatus('paste sender offer first');
+      return;
+    }
     const offer = JSON.parse(ui.viewerOfferIn.value);
     await state.viewerPeer.setRemoteDescription(offer);
     const answer = await state.viewerPeer.createAnswer();
@@ -692,5 +756,6 @@ window.addEventListener('beforeunload', () => {
   if (state.replayUrlB) URL.revokeObjectURL(state.replayUrlB);
 });
 
+updateCompatibilityHints();
 listCameras();
 drawAnalysis();

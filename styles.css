@@ -138,6 +138,12 @@ label {
   margin-top: 0.8rem;
 }
 
+.settings-status {
+  color: var(--accent);
+  margin: 0.5rem 0 0;
+  font-weight: 600;
+}
+
 .relay-panel {
   margin-top: 1rem;
   border-top: 1px solid #2a3f66;
