@@ -1,13 +1,13 @@
 const state = {
   streamA: null,
   streamB: null,
-  recorderA: null,
-  recorderB: null,
-  mediaBufferA: [],
-  mediaBufferB: [],
-  preRollA: [],
-  preRollB: [],
-  preRollTimer: null,
+  rollingRecorderA: null,
+  rollingRecorderB: null,
+  rollingChunksA: [],
+  rollingChunksB: [],
+  replayUrlA: '',
+  replayUrlB: '',
+  isRecordingShot: false,
   impactEnabled: false,
   audioContext: null,
   analyser: null,
@@ -18,10 +18,16 @@ const state = {
   angleDraft: [],
   tracePoints: [],
   savedLines: [],
-  savedAngles: []
+  savedAngles: [],
+  senderPeer: null,
+  viewerPeer: null,
+  senderStream: null,
+  remoteViewerStream: null
 };
 
 const ui = {
+  views: Array.from(document.querySelectorAll('.view')),
+  tabs: Array.from(document.querySelectorAll('.tab')),
   cameraA: document.getElementById('cameraA'),
   cameraB: document.getElementById('cameraB'),
   resolution: document.getElementById('resolution'),
@@ -30,6 +36,7 @@ const ui = {
   postRollSeconds: document.getElementById('postRollSeconds'),
   impactThreshold: document.getElementById('impactThreshold'),
   impactValue: document.getElementById('impactValue'),
+  refreshCameras: document.getElementById('refreshCameras'),
   startMonitor: document.getElementById('startMonitor'),
   stopMonitor: document.getElementById('stopMonitor'),
   toggleImpact: document.getElementById('toggleImpact'),
@@ -37,8 +44,10 @@ const ui = {
   status: document.getElementById('status'),
   videoA: document.getElementById('videoA'),
   videoB: document.getElementById('videoB'),
+  feedBCard: document.getElementById('feedBCard'),
   replayA: document.getElementById('replayA'),
   replayB: document.getElementById('replayB'),
+  replayBCard: document.getElementById('replayBCard'),
   instantReplay: document.getElementById('instantReplay'),
   halfReplay: document.getElementById('halfReplay'),
   normalReplay: document.getElementById('normalReplay'),
@@ -47,7 +56,16 @@ const ui = {
   captureFrame: document.getElementById('captureFrame'),
   clearOverlays: document.getElementById('clearOverlays'),
   analysisCanvas: document.getElementById('analysisCanvas'),
-  measurements: document.getElementById('measurements')
+  measurements: document.getElementById('measurements'),
+  startSender: document.getElementById('startSender'),
+  senderOffer: document.getElementById('senderOffer'),
+  copySenderOffer: document.getElementById('copySenderOffer'),
+  senderAnswerIn: document.getElementById('senderAnswerIn'),
+  applySenderAnswer: document.getElementById('applySenderAnswer'),
+  viewerOfferIn: document.getElementById('viewerOfferIn'),
+  buildViewerAnswer: document.getElementById('buildViewerAnswer'),
+  viewerAnswer: document.getElementById('viewerAnswer'),
+  copyViewerAnswer: document.getElementById('copyViewerAnswer')
 };
 
 const ctx = ui.analysisCanvas.getContext('2d');
@@ -56,110 +74,84 @@ function setStatus(message) {
   ui.status.textContent = `Status: ${message}`;
 }
 
+function switchView(target) {
+  ui.views.forEach((view) => view.classList.toggle('active', view.dataset.view === target));
+  ui.tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.target === target));
+}
+
 function parseResolution() {
   const [width, height] = ui.resolution.value.split('x').map(Number);
   return { width, height };
 }
 
+function chooseSupportedMime() {
+  const mimes = [
+    'video/mp4;codecs=h264',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm'
+  ];
+  return mimes.find((m) => MediaRecorder.isTypeSupported(m)) || '';
+}
+
+function addCameraOptions(select, devices) {
+  select.innerHTML = '';
+  [
+    { value: 'environment', label: 'Back Camera (recommended mobile)' },
+    { value: 'user', label: 'Front Camera (selfie)' }
+  ].forEach((preset) => {
+    const opt = document.createElement('option');
+    opt.value = preset.value;
+    opt.textContent = preset.label;
+    select.appendChild(opt);
+  });
+
+  devices.forEach((device, index) => {
+    const option = document.createElement('option');
+    option.value = device.deviceId;
+    option.textContent = device.label || `Camera ${index + 1}`;
+    select.appendChild(option);
+  });
+}
+
 async function listCameras() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus('camera APIs unavailable in this browser');
+    return;
+  }
+
   try {
     const temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     temp.getTracks().forEach((track) => track.stop());
     const devices = await navigator.mediaDevices.enumerateDevices();
     const videos = devices.filter((device) => device.kind === 'videoinput');
 
-    for (const select of [ui.cameraA, ui.cameraB]) {
-      select.innerHTML = '';
-      videos.forEach((device, index) => {
-        const option = document.createElement('option');
-        option.value = device.deviceId;
-        option.textContent = device.label || `Camera ${index + 1}`;
-        select.appendChild(option);
-      });
-    }
-    if (ui.cameraB.options.length > 1) {
-      ui.cameraB.selectedIndex = 1;
+    addCameraOptions(ui.cameraA, videos);
+    addCameraOptions(ui.cameraB, videos);
+
+    if (videos.length > 1) {
+      ui.cameraA.value = videos[0].deviceId;
+      ui.cameraB.value = videos[1].deviceId;
+    } else {
+      ui.cameraA.value = 'environment';
+      ui.cameraB.value = 'user';
+      setStatus('single-camera device detected, second view may mirror or remain unavailable');
     }
   } catch (error) {
     setStatus(`unable to enumerate cameras (${error.message})`);
   }
 }
 
-function chooseSupportedMime() {
-  const mimes = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
-  return mimes.find((m) => MediaRecorder.isTypeSupported(m)) || '';
-}
-
-function setupPreRollSampling() {
-  clearInterval(state.preRollTimer);
-  state.preRollTimer = setInterval(async () => {
-    if (!state.streamA || !state.streamB) return;
-
-    const snapA = await snapshotStream(state.streamA, ui.videoA);
-    const snapB = await snapshotStream(state.streamB, ui.videoB);
-
-    if (snapA) state.preRollA.push(snapA);
-    if (snapB) state.preRollB.push(snapB);
-
-    const maxSamples = Number(ui.preRollSeconds.value) * 6;
-    state.preRollA = state.preRollA.slice(-maxSamples);
-    state.preRollB = state.preRollB.slice(-maxSamples);
-  }, 160);
-}
-
-async function snapshotStream(stream, sourceVideo) {
-  if (!stream || sourceVideo.readyState < 2) return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = sourceVideo.videoWidth || 640;
-  canvas.height = sourceVideo.videoHeight || 360;
-  const context = canvas.getContext('2d');
-  context.drawImage(sourceVideo, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/webp', 0.8);
-}
-
-async function startMonitoring() {
+function streamConstraints(selection) {
   const { width, height } = parseResolution();
   const fps = Number(ui.fpsTarget.value);
+  const base = { width: { ideal: width }, height: { ideal: height }, frameRate: { ideal: fps } };
 
-  const constraintsA = {
-    video: {
-      deviceId: ui.cameraA.value ? { exact: ui.cameraA.value } : undefined,
-      width: { ideal: width },
-      height: { ideal: height },
-      frameRate: { ideal: fps }
-    },
-    audio: false
-  };
-
-  const constraintsB = {
-    video: {
-      deviceId: ui.cameraB.value ? { exact: ui.cameraB.value } : undefined,
-      width: { ideal: width },
-      height: { ideal: height },
-      frameRate: { ideal: fps }
-    },
-    audio: false
-  };
-
-  try {
-    state.streamA = await navigator.mediaDevices.getUserMedia(constraintsA);
-    state.streamB = await navigator.mediaDevices.getUserMedia(constraintsB);
-
-    ui.videoA.srcObject = state.streamA;
-    ui.videoB.srcObject = state.streamB;
-
-    setupPreRollSampling();
-
-    ui.startMonitor.disabled = true;
-    ui.stopMonitor.disabled = false;
-    ui.toggleImpact.disabled = false;
-    ui.manualRecord.disabled = false;
-    ui.captureFrame.disabled = false;
-
-    setStatus('dual monitor active (wireless, low-latency preview)');
-  } catch (error) {
-    setStatus(`failed to start monitor (${error.message})`);
+  if (selection === 'environment' || selection === 'user') {
+    return { video: { ...base, facingMode: { ideal: selection } }, audio: false };
   }
+
+  return { video: { ...base, deviceId: { exact: selection } }, audio: false };
 }
 
 function stopStream(stream) {
@@ -167,7 +159,94 @@ function stopStream(stream) {
   stream.getTracks().forEach((track) => track.stop());
 }
 
+function trimRollingChunks() {
+  const now = Date.now();
+  const keepMs = Math.max(0, Number(ui.preRollSeconds.value)) * 1000;
+  state.rollingChunksA = state.rollingChunksA.filter((entry) => now - entry.time <= keepMs);
+  state.rollingChunksB = state.rollingChunksB.filter((entry) => now - entry.time <= keepMs);
+}
+
+function attachRollingRecorder(stream, side) {
+  const mimeType = chooseSupportedMime();
+  if (!mimeType) {
+    setStatus('recording not supported in this browser');
+    return null;
+  }
+
+  const recorder = new MediaRecorder(stream, { mimeType });
+  recorder.ondataavailable = (event) => {
+    if (!event.data || event.data.size === 0) return;
+    const entry = { blob: event.data, time: Date.now() };
+    if (side === 'A') {
+      state.rollingChunksA.push(entry);
+    } else {
+      state.rollingChunksB.push(entry);
+    }
+    trimRollingChunks();
+  };
+  recorder.start(250);
+  return recorder;
+}
+
+function getStreamLabel(hasSecond) {
+  if (hasSecond) return 'dual monitor active';
+  return 'single camera active (second view unavailable on this device)';
+}
+
+async function startMonitoring() {
+  try {
+    await stopMonitoring();
+
+    state.streamA = await navigator.mediaDevices.getUserMedia(streamConstraints(ui.cameraA.value));
+    ui.videoA.srcObject = state.streamA;
+
+    try {
+      state.streamB = await navigator.mediaDevices.getUserMedia(streamConstraints(ui.cameraB.value));
+      ui.videoB.srcObject = state.streamB;
+      ui.feedBCard.classList.remove('hidden');
+      ui.replayBCard.classList.remove('hidden');
+    } catch {
+      state.streamB = null;
+      ui.videoB.srcObject = null;
+      ui.feedBCard.classList.add('hidden');
+      ui.replayBCard.classList.add('hidden');
+    }
+
+    state.rollingChunksA = [];
+    state.rollingChunksB = [];
+    state.rollingRecorderA = attachRollingRecorder(state.streamA, 'A');
+    if (state.streamB) {
+      state.rollingRecorderB = attachRollingRecorder(state.streamB, 'B');
+    }
+
+    ui.startMonitor.disabled = true;
+    ui.stopMonitor.disabled = false;
+    ui.manualRecord.disabled = false;
+    ui.toggleImpact.disabled = false;
+    ui.captureFrame.disabled = false;
+    setStatus(getStreamLabel(Boolean(state.streamB)));
+  } catch (error) {
+    setStatus(`failed to start monitor (${error.message})`);
+  }
+}
+
+function stopRecorder(recorder) {
+  return new Promise((resolve) => {
+    if (!recorder || recorder.state === 'inactive') {
+      resolve();
+      return;
+    }
+    recorder.addEventListener('stop', resolve, { once: true });
+    recorder.stop();
+  });
+}
+
 async function stopMonitoring() {
+  await disableImpactTrigger();
+  await Promise.all([stopRecorder(state.rollingRecorderA), stopRecorder(state.rollingRecorderB)]);
+  state.rollingRecorderA = null;
+  state.rollingRecorderB = null;
+
   stopStream(state.streamA);
   stopStream(state.streamB);
   state.streamA = null;
@@ -175,84 +254,93 @@ async function stopMonitoring() {
   ui.videoA.srcObject = null;
   ui.videoB.srcObject = null;
 
-  await disableImpactTrigger();
-
-  clearInterval(state.preRollTimer);
-  state.preRollA = [];
-  state.preRollB = [];
-
   ui.startMonitor.disabled = false;
   ui.stopMonitor.disabled = true;
-  ui.toggleImpact.disabled = true;
   ui.manualRecord.disabled = true;
+  ui.toggleImpact.disabled = true;
   ui.captureFrame.disabled = true;
 
-  setStatus('monitor stopped');
+  if (!state.isRecordingShot) {
+    setStatus('monitor stopped');
+  }
 }
 
-function buildRecorder(stream, targetBuffer) {
+function collectPreRoll(side) {
+  const source = side === 'A' ? state.rollingChunksA : state.rollingChunksB;
+  return source.map((entry) => entry.blob);
+}
+
+async function recordSingleStream(stream, side) {
+  if (!stream) return null;
   const mimeType = chooseSupportedMime();
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  if (!mimeType) return null;
+
+  const chunks = [];
+  const recorder = new MediaRecorder(stream, { mimeType });
   recorder.ondataavailable = (event) => {
-    if (event.data.size > 0) targetBuffer.push(event.data);
+    if (event.data && event.data.size > 0) {
+      chunks.push(event.data);
+    }
   };
-  return recorder;
+
+  recorder.start(250);
+  await new Promise((resolve) => setTimeout(resolve, Number(ui.postRollSeconds.value) * 1000));
+  await stopRecorder(recorder);
+
+  const preRoll = collectPreRoll(side);
+  return new Blob([...preRoll, ...chunks], { type: mimeType });
 }
 
-function bufferDataURLtoBlob(dataURL) {
-  const [header, base64] = dataURL.split(',');
-  const mime = header.match(/:(.*?);/)[1];
-  const binary = atob(base64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
+function setReplaySource(video, nextBlob, oldUrlKey) {
+  if (state[oldUrlKey]) {
+    URL.revokeObjectURL(state[oldUrlKey]);
+  }
+  const nextUrl = URL.createObjectURL(nextBlob);
+  state[oldUrlKey] = nextUrl;
+  video.src = nextUrl;
 }
 
-async function recordShot(reason = 'manual trigger') {
-  if (!state.streamA || !state.streamB || state.recorderA || state.recorderB) return;
+async function recordShot(trigger = 'manual') {
+  if (!state.streamA || state.isRecordingShot) {
+    return;
+  }
 
-  state.mediaBufferA = [];
-  state.mediaBufferB = [];
+  state.isRecordingShot = true;
+  ui.manualRecord.disabled = true;
+  setStatus(`recording shot (${trigger})`);
 
-  state.recorderA = buildRecorder(state.streamA, state.mediaBufferA);
-  state.recorderB = buildRecorder(state.streamB, state.mediaBufferB);
+  try {
+    const [blobA, blobB] = await Promise.all([
+      recordSingleStream(state.streamA, 'A'),
+      state.streamB ? recordSingleStream(state.streamB, 'B') : Promise.resolve(null)
+    ]);
 
-  state.recorderA.start();
-  state.recorderB.start();
+    if (!blobA || blobA.size === 0) {
+      throw new Error('empty recording generated');
+    }
 
-  setStatus(`recording shot (${reason})`);
+    setReplaySource(ui.replayA, blobA, 'replayUrlA');
 
-  const postRoll = Math.max(1, Number(ui.postRollSeconds.value));
-  await new Promise((resolve) => setTimeout(resolve, postRoll * 1000));
+    if (blobB && blobB.size > 0) {
+      setReplaySource(ui.replayB, blobB, 'replayUrlB');
+      ui.replayBCard.classList.remove('hidden');
+    }
 
-  await Promise.all([
-    new Promise((resolve) => {
-      state.recorderA.onstop = resolve;
-      state.recorderA.stop();
-    }),
-    new Promise((resolve) => {
-      state.recorderB.onstop = resolve;
-      state.recorderB.stop();
-    })
-  ]);
+    ui.instantReplay.disabled = false;
+    ui.halfReplay.disabled = false;
+    ui.normalReplay.disabled = false;
 
-  const preRollBlobsA = state.preRollA.map(bufferDataURLtoBlob);
-  const preRollBlobsB = state.preRollB.map(bufferDataURLtoBlob);
-
-  const blobA = new Blob([...preRollBlobsA, ...state.mediaBufferA], { type: chooseSupportedMime() || 'video/webm' });
-  const blobB = new Blob([...preRollBlobsB, ...state.mediaBufferB], { type: chooseSupportedMime() || 'video/webm' });
-
-  ui.replayA.src = URL.createObjectURL(blobA);
-  ui.replayB.src = URL.createObjectURL(blobB);
-
-  ui.instantReplay.disabled = false;
-  ui.halfReplay.disabled = false;
-  ui.normalReplay.disabled = false;
-
-  state.recorderA = null;
-  state.recorderB = null;
-  setStatus('shot captured and ready for replay');
+    switchView('replay');
+    replayAtRate(0.25);
+    setStatus('shot captured and replay ready');
+  } catch (error) {
+    setStatus(`recording failed (${error.message})`);
+  } finally {
+    state.isRecordingShot = false;
+    if (state.streamA) {
+      ui.manualRecord.disabled = false;
+    }
+  }
 }
 
 async function enableImpactTrigger() {
@@ -274,12 +362,12 @@ async function enableImpactTrigger() {
       const average = data.reduce((a, b) => a + b, 0) / data.length;
       const dbApprox = 20 * Math.log10(Math.max(average / 255, 0.0001));
 
-      if (dbApprox > threshold() && !state.impactCooldown && !state.recorderA && !state.recorderB) {
+      if (dbApprox > threshold() && !state.impactCooldown && !state.isRecordingShot) {
         state.impactCooldown = true;
-        recordShot('impact detected');
+        recordShot('impact');
         setTimeout(() => {
           state.impactCooldown = false;
-        }, 1800);
+        }, 1500);
       }
       requestAnimationFrame(detect);
     };
@@ -323,12 +411,131 @@ function replayAtRate(rate) {
   setStatus(`replaying at ${rate}x`);
 }
 
+function createPeerConnection() {
+  const peer = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+
+  peer.addEventListener('connectionstatechange', () => {
+    if (peer.connectionState === 'connected') {
+      setStatus('remote link connected');
+      switchView('live');
+    }
+    if (peer.connectionState === 'failed') {
+      setStatus('remote link failed, restart pairing');
+    }
+  });
+
+  return peer;
+}
+
+function waitIceComplete(peer) {
+  return new Promise((resolve) => {
+    if (peer.iceGatheringState === 'complete') {
+      resolve();
+      return;
+    }
+    const onChange = () => {
+      if (peer.iceGatheringState === 'complete') {
+        peer.removeEventListener('icegatheringstatechange', onChange);
+        resolve();
+      }
+    };
+    peer.addEventListener('icegatheringstatechange', onChange);
+    setTimeout(() => {
+      peer.removeEventListener('icegatheringstatechange', onChange);
+      resolve();
+    }, 3000);
+  });
+}
+
+async function startSenderFlow() {
+  try {
+    if (state.senderPeer) state.senderPeer.close();
+    stopStream(state.senderStream);
+
+    state.senderStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+
+    ui.videoA.srcObject = state.senderStream;
+    ui.feedBCard.classList.add('hidden');
+
+    state.senderPeer = createPeerConnection();
+    state.senderStream.getTracks().forEach((track) => state.senderPeer.addTrack(track, state.senderStream));
+
+    const offer = await state.senderPeer.createOffer();
+    await state.senderPeer.setLocalDescription(offer);
+    await waitIceComplete(state.senderPeer);
+
+    ui.senderOffer.value = JSON.stringify(state.senderPeer.localDescription);
+    setStatus('sender offer generated, copy to viewer device');
+  } catch (error) {
+    setStatus(`sender setup failed (${error.message})`);
+  }
+}
+
+async function applySenderAnswer() {
+  try {
+    if (!state.senderPeer) {
+      setStatus('start sender first');
+      return;
+    }
+    const answer = JSON.parse(ui.senderAnswerIn.value);
+    await state.senderPeer.setRemoteDescription(answer);
+    setStatus('viewer answer applied, waiting for connection');
+  } catch (error) {
+    setStatus(`invalid viewer answer (${error.message})`);
+  }
+}
+
+async function buildViewerAnswer() {
+  try {
+    if (state.viewerPeer) state.viewerPeer.close();
+    state.viewerPeer = createPeerConnection();
+
+    state.viewerPeer.ontrack = (event) => {
+      if (!state.remoteViewerStream) {
+        state.remoteViewerStream = new MediaStream();
+      }
+      state.remoteViewerStream.addTrack(event.track);
+      ui.videoA.srcObject = state.remoteViewerStream;
+      ui.feedBCard.classList.add('hidden');
+      ui.startMonitor.disabled = true;
+      ui.stopMonitor.disabled = true;
+      setStatus('remote camera stream received in live view');
+      switchView('live');
+    };
+
+    const offer = JSON.parse(ui.viewerOfferIn.value);
+    await state.viewerPeer.setRemoteDescription(offer);
+    const answer = await state.viewerPeer.createAnswer();
+    await state.viewerPeer.setLocalDescription(answer);
+    await waitIceComplete(state.viewerPeer);
+
+    ui.viewerAnswer.value = JSON.stringify(state.viewerPeer.localDescription);
+    setStatus('viewer answer generated, copy back to sender device');
+  } catch (error) {
+    setStatus(`viewer setup failed (${error.message})`);
+  }
+}
+
+async function copyText(value, successMessage) {
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    setStatus(successMessage);
+  } catch {
+    setStatus('clipboard blocked by browser, copy manually');
+  }
+}
+
 function drawAnalysis() {
-  const canvas = ui.analysisCanvas;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, ui.analysisCanvas.width, ui.analysisCanvas.height);
 
   if (state.overlayImage) {
-    ctx.drawImage(state.overlayImage, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(state.overlayImage, 0, 0, ui.analysisCanvas.width, ui.analysisCanvas.height);
   }
 
   ctx.lineWidth = 3;
@@ -357,14 +564,8 @@ function drawAnalysis() {
     ctx.strokeStyle = '#ff4d6d';
     ctx.beginPath();
     ctx.moveTo(state.tracePoints[0].x, state.tracePoints[0].y);
-    for (const point of state.tracePoints.slice(1)) {
-      ctx.lineTo(point.x, point.y);
-    }
+    state.tracePoints.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
     ctx.stroke();
-  }
-
-  if (state.lineDraft.length === 1) {
-    drawPoint(state.lineDraft[0], '#2fd4b1');
   }
 
   state.tracePoints.forEach((point) => drawPoint(point, '#ff4d6d', 4));
@@ -391,8 +592,7 @@ function measureAngle(a, b, c) {
   const dot = ab.x * cb.x + ab.y * cb.y;
   const magAB = Math.hypot(ab.x, ab.y);
   const magCB = Math.hypot(cb.x, cb.y);
-  const cosTheta = dot / (magAB * magCB);
-  const safe = Math.min(1, Math.max(-1, cosTheta));
+  const safe = Math.min(1, Math.max(-1, dot / (magAB * magCB)));
   return Math.acos(safe) * (180 / Math.PI);
 }
 
@@ -447,7 +647,6 @@ function captureReplayFrame() {
   state.overlayImage = new Image();
   state.overlayImage.onload = drawAnalysis;
   state.overlayImage.src = temp.toDataURL('image/png');
-
   setStatus(`captured ${ui.editorSource.value} frame for analysis`);
 }
 
@@ -461,23 +660,36 @@ function clearOverlays() {
   drawAnalysis();
 }
 
+ui.tabs.forEach((tab) => {
+  tab.addEventListener('click', () => switchView(tab.dataset.target));
+});
 ui.impactThreshold.addEventListener('input', () => {
   ui.impactValue.textContent = `${ui.impactThreshold.value} dB`;
 });
-
+ui.refreshCameras.addEventListener('click', listCameras);
 ui.startMonitor.addEventListener('click', startMonitoring);
 ui.stopMonitor.addEventListener('click', stopMonitoring);
+ui.manualRecord.addEventListener('click', () => recordShot('manual'));
 ui.toggleImpact.addEventListener('click', toggleImpactTrigger);
-ui.manualRecord.addEventListener('click', () => recordShot('manual trigger'));
 ui.instantReplay.addEventListener('click', () => replayAtRate(0.25));
 ui.halfReplay.addEventListener('click', () => replayAtRate(0.5));
 ui.normalReplay.addEventListener('click', () => replayAtRate(1));
 ui.captureFrame.addEventListener('click', captureReplayFrame);
 ui.clearOverlays.addEventListener('click', clearOverlays);
 ui.analysisCanvas.addEventListener('click', onCanvasClick);
+ui.startSender.addEventListener('click', startSenderFlow);
+ui.applySenderAnswer.addEventListener('click', applySenderAnswer);
+ui.buildViewerAnswer.addEventListener('click', buildViewerAnswer);
+ui.copySenderOffer.addEventListener('click', () => copyText(ui.senderOffer.value, 'sender offer copied'));
+ui.copyViewerAnswer.addEventListener('click', () => copyText(ui.viewerAnswer.value, 'viewer answer copied'));
 
 window.addEventListener('beforeunload', () => {
   stopMonitoring();
+  stopStream(state.senderStream);
+  if (state.senderPeer) state.senderPeer.close();
+  if (state.viewerPeer) state.viewerPeer.close();
+  if (state.replayUrlA) URL.revokeObjectURL(state.replayUrlA);
+  if (state.replayUrlB) URL.revokeObjectURL(state.replayUrlB);
 });
 
 listCameras();
