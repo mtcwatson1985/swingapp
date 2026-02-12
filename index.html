@@ -89,10 +89,8 @@
       <section class="view" data-view="settings">
         <header class="view-header">
           <h1>Settings</h1>
-          <p>Camera setup, recording timing, and impact trigger.</p>
+          <p>Camera setup, recording timing, impact trigger, and iPhone-to-iPad relay.</p>
         </header>
-
-        <p class="note">Cross-device note: each device can only access its own local cameras in browser. Directly using desktop USB cameras on iPad/iPhone is not supported by the browser camera APIs.</p>
 
         <div class="control-grid">
           <label>Camera A (Down-the-line)
@@ -129,6 +127,30 @@
           <button id="refreshCameras">Refresh Cameras</button>
           <button id="toggleImpact" disabled>Enable Impact Trigger</button>
         </div>
+
+        <section class="relay-panel">
+          <h2>iPhone camera → iPad/TV monitor pairing</h2>
+          <p class="note">No backend server is configured yet, so pairing is done by copy/paste once. After connected, the iPhone stream appears in Live view on the viewer device.</p>
+
+          <div class="relay-grid">
+            <article>
+              <h3>On iPhone (Camera Sender)</h3>
+              <button id="startSender">1) Start Sender + Generate Offer</button>
+              <textarea id="senderOffer" rows="4" placeholder="Sender offer appears here"></textarea>
+              <button id="copySenderOffer">Copy Offer</button>
+              <textarea id="senderAnswerIn" rows="4" placeholder="Paste viewer answer here"></textarea>
+              <button id="applySenderAnswer">3) Apply Viewer Answer</button>
+            </article>
+
+            <article>
+              <h3>On iPad/TV (Viewer)</h3>
+              <textarea id="viewerOfferIn" rows="4" placeholder="Paste sender offer here"></textarea>
+              <button id="buildViewerAnswer">2) Build Viewer Answer</button>
+              <textarea id="viewerAnswer" rows="4" placeholder="Viewer answer appears here"></textarea>
+              <button id="copyViewerAnswer">Copy Answer</button>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
 

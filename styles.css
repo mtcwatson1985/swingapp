@@ -85,12 +85,20 @@ video {
 
 input,
 select,
-button {
+button,
+textarea {
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   background: #11192f;
   color: var(--text);
   padding: 0.55rem 0.6rem;
+}
+
+textarea {
+  width: 100%;
+  min-height: 74px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 button {
@@ -128,6 +136,38 @@ label {
   border-radius: 10px;
   padding: 0.6rem;
   margin-top: 0.8rem;
+}
+
+.relay-panel {
+  margin-top: 1rem;
+  border-top: 1px solid #2a3f66;
+  padding-top: 1rem;
+}
+
+.relay-panel h2 {
+  margin: 0;
+}
+
+.relay-grid {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.8rem;
+}
+
+.relay-grid article {
+  background: #0b1324;
+  border: 1px solid #2a3f66;
+  border-radius: 12px;
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.relay-grid h3 {
+  margin: 0;
+  font-size: 0.95rem;
 }
 
 .editor-controls {

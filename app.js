@@ -18,7 +18,11 @@ const state = {
   angleDraft: [],
   tracePoints: [],
   savedLines: [],
-  savedAngles: []
+  savedAngles: [],
+  senderPeer: null,
+  viewerPeer: null,
+  senderStream: null,
+  remoteViewerStream: null
 };
 
 const ui = {
@@ -52,7 +56,16 @@ const ui = {
   captureFrame: document.getElementById('captureFrame'),
   clearOverlays: document.getElementById('clearOverlays'),
   analysisCanvas: document.getElementById('analysisCanvas'),
-  measurements: document.getElementById('measurements')
+  measurements: document.getElementById('measurements'),
+  startSender: document.getElementById('startSender'),
+  senderOffer: document.getElementById('senderOffer'),
+  copySenderOffer: document.getElementById('copySenderOffer'),
+  senderAnswerIn: document.getElementById('senderAnswerIn'),
+  applySenderAnswer: document.getElementById('applySenderAnswer'),
+  viewerOfferIn: document.getElementById('viewerOfferIn'),
+  buildViewerAnswer: document.getElementById('buildViewerAnswer'),
+  viewerAnswer: document.getElementById('viewerAnswer'),
+  copyViewerAnswer: document.getElementById('copyViewerAnswer')
 };
 
 const ctx = ui.analysisCanvas.getContext('2d');
@@ -398,6 +411,126 @@ function replayAtRate(rate) {
   setStatus(`replaying at ${rate}x`);
 }
 
+function createPeerConnection() {
+  const peer = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+
+  peer.addEventListener('connectionstatechange', () => {
+    if (peer.connectionState === 'connected') {
+      setStatus('remote link connected');
+      switchView('live');
+    }
+    if (peer.connectionState === 'failed') {
+      setStatus('remote link failed, restart pairing');
+    }
+  });
+
+  return peer;
+}
+
+function waitIceComplete(peer) {
+  return new Promise((resolve) => {
+    if (peer.iceGatheringState === 'complete') {
+      resolve();
+      return;
+    }
+    const onChange = () => {
+      if (peer.iceGatheringState === 'complete') {
+        peer.removeEventListener('icegatheringstatechange', onChange);
+        resolve();
+      }
+    };
+    peer.addEventListener('icegatheringstatechange', onChange);
+    setTimeout(() => {
+      peer.removeEventListener('icegatheringstatechange', onChange);
+      resolve();
+    }, 3000);
+  });
+}
+
+async function startSenderFlow() {
+  try {
+    if (state.senderPeer) state.senderPeer.close();
+    stopStream(state.senderStream);
+
+    state.senderStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+
+    ui.videoA.srcObject = state.senderStream;
+    ui.feedBCard.classList.add('hidden');
+
+    state.senderPeer = createPeerConnection();
+    state.senderStream.getTracks().forEach((track) => state.senderPeer.addTrack(track, state.senderStream));
+
+    const offer = await state.senderPeer.createOffer();
+    await state.senderPeer.setLocalDescription(offer);
+    await waitIceComplete(state.senderPeer);
+
+    ui.senderOffer.value = JSON.stringify(state.senderPeer.localDescription);
+    setStatus('sender offer generated, copy to viewer device');
+  } catch (error) {
+    setStatus(`sender setup failed (${error.message})`);
+  }
+}
+
+async function applySenderAnswer() {
+  try {
+    if (!state.senderPeer) {
+      setStatus('start sender first');
+      return;
+    }
+    const answer = JSON.parse(ui.senderAnswerIn.value);
+    await state.senderPeer.setRemoteDescription(answer);
+    setStatus('viewer answer applied, waiting for connection');
+  } catch (error) {
+    setStatus(`invalid viewer answer (${error.message})`);
+  }
+}
+
+async function buildViewerAnswer() {
+  try {
+    if (state.viewerPeer) state.viewerPeer.close();
+    state.viewerPeer = createPeerConnection();
+
+    state.viewerPeer.ontrack = (event) => {
+      if (!state.remoteViewerStream) {
+        state.remoteViewerStream = new MediaStream();
+      }
+      state.remoteViewerStream.addTrack(event.track);
+      ui.videoA.srcObject = state.remoteViewerStream;
+      ui.feedBCard.classList.add('hidden');
+      ui.startMonitor.disabled = true;
+      ui.stopMonitor.disabled = true;
+      setStatus('remote camera stream received in live view');
+      switchView('live');
+    };
+
+    const offer = JSON.parse(ui.viewerOfferIn.value);
+    await state.viewerPeer.setRemoteDescription(offer);
+    const answer = await state.viewerPeer.createAnswer();
+    await state.viewerPeer.setLocalDescription(answer);
+    await waitIceComplete(state.viewerPeer);
+
+    ui.viewerAnswer.value = JSON.stringify(state.viewerPeer.localDescription);
+    setStatus('viewer answer generated, copy back to sender device');
+  } catch (error) {
+    setStatus(`viewer setup failed (${error.message})`);
+  }
+}
+
+async function copyText(value, successMessage) {
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    setStatus(successMessage);
+  } catch {
+    setStatus('clipboard blocked by browser, copy manually');
+  }
+}
+
 function drawAnalysis() {
   ctx.clearRect(0, 0, ui.analysisCanvas.width, ui.analysisCanvas.height);
 
@@ -544,9 +677,17 @@ ui.normalReplay.addEventListener('click', () => replayAtRate(1));
 ui.captureFrame.addEventListener('click', captureReplayFrame);
 ui.clearOverlays.addEventListener('click', clearOverlays);
 ui.analysisCanvas.addEventListener('click', onCanvasClick);
+ui.startSender.addEventListener('click', startSenderFlow);
+ui.applySenderAnswer.addEventListener('click', applySenderAnswer);
+ui.buildViewerAnswer.addEventListener('click', buildViewerAnswer);
+ui.copySenderOffer.addEventListener('click', () => copyText(ui.senderOffer.value, 'sender offer copied'));
+ui.copyViewerAnswer.addEventListener('click', () => copyText(ui.viewerAnswer.value, 'viewer answer copied'));
 
 window.addEventListener('beforeunload', () => {
   stopMonitoring();
+  stopStream(state.senderStream);
+  if (state.senderPeer) state.senderPeer.close();
+  if (state.viewerPeer) state.viewerPeer.close();
   if (state.replayUrlA) URL.revokeObjectURL(state.replayUrlA);
   if (state.replayUrlB) URL.revokeObjectURL(state.replayUrlB);
 });
