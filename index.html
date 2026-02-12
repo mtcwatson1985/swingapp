@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Swing Capture Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="view active" data-view="live">
+        <header class="view-header">
+          <h1>Live Swing Monitor</h1>
+          <p id="status">Status: idle</p>
+        </header>
+
+        <div class="live-grid" id="liveGrid">
+          <article class="feed-card">
+            <h2>Down-the-line</h2>
+            <video id="videoA" autoplay playsinline muted></video>
+          </article>
+          <article class="feed-card" id="feedBCard">
+            <h2>Face-on</h2>
+            <video id="videoB" autoplay playsinline muted></video>
+          </article>
+        </div>
+
+        <div class="quick-actions">
+          <button id="startMonitor">Start Monitor</button>
+          <button id="stopMonitor" disabled>Stop</button>
+          <button id="manualRecord" disabled>Record Shot</button>
+        </div>
+      </section>
+
+      <section class="view" data-view="replay">
+        <header class="view-header">
+          <h1>Instant Replay</h1>
+          <p>After each shot, replay opens automatically here.</p>
+        </header>
+
+        <div class="live-grid">
+          <article class="feed-card">
+            <h2>Replay A</h2>
+            <video id="replayA" controls playsinline></video>
+          </article>
+          <article class="feed-card" id="replayBCard">
+            <h2>Replay B</h2>
+            <video id="replayB" controls playsinline></video>
+          </article>
+        </div>
+
+        <div class="quick-actions">
+          <button id="instantReplay" disabled>0.25x</button>
+          <button id="halfReplay" disabled>0.5x</button>
+          <button id="normalReplay" disabled>1x</button>
+        </div>
+      </section>
+
+      <section class="view" data-view="analysis">
+        <header class="view-header">
+          <h1>Analysis Booth</h1>
+          <p>Capture a replay frame, draw lines, angles, and clubhead trace.</p>
+        </header>
+
+        <div class="editor-controls">
+          <label>Source
+            <select id="editorSource">
+              <option value="A">Replay A</option>
+              <option value="B">Replay B</option>
+            </select>
+          </label>
+          <label>Tool
+            <select id="toolMode">
+              <option value="line">Line</option>
+              <option value="angle">Angle</option>
+              <option value="trace">Clubhead Trace</option>
+            </select>
+          </label>
+          <button id="captureFrame" disabled>Capture Frame</button>
+          <button id="clearOverlays">Clear</button>
+        </div>
+
+        <div class="canvas-wrap">
+          <canvas id="analysisCanvas" width="960" height="540"></canvas>
+        </div>
+        <p id="measurements">Measurements: none yet.</p>
+      </section>
+
+      <section class="view" data-view="settings">
+        <header class="view-header">
+          <h1>Settings</h1>
+          <p>Camera setup, recording timing, and impact trigger.</p>
+        </header>
+
+        <p class="note">Cross-device note: each device can only access its own local cameras in browser. Directly using desktop USB cameras on iPad/iPhone is not supported by the browser camera APIs.</p>
+
+        <div class="control-grid">
+          <label>Camera A (Down-the-line)
+            <select id="cameraA"></select>
+          </label>
+          <label>Camera B (Face-on)
+            <select id="cameraB"></select>
+          </label>
+          <label>Resolution
+            <select id="resolution">
+              <option value="1280x720">720p</option>
+              <option value="1920x1080" selected>1080p</option>
+            </select>
+          </label>
+          <label>FPS target
+            <select id="fpsTarget">
+              <option value="30">30 fps</option>
+              <option value="60" selected>60 fps</option>
+            </select>
+          </label>
+          <label>Pre-roll seconds
+            <input id="preRollSeconds" type="number" min="0" max="8" value="2" />
+          </label>
+          <label>Post-roll seconds
+            <input id="postRollSeconds" type="number" min="1" max="10" value="3" />
+          </label>
+          <label>Impact sensitivity (dB)
+            <input id="impactThreshold" type="range" min="-75" max="-20" value="-38" />
+            <span id="impactValue">-38 dB</span>
+          </label>
+        </div>
+
+        <div class="quick-actions">
+          <button id="refreshCameras">Refresh Cameras</button>
+          <button id="toggleImpact" disabled>Enable Impact Trigger</button>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="tab active" data-target="live">Live</button>
+      <button class="tab" data-target="replay">Replay</button>
+      <button class="tab" data-target="analysis">Analysis</button>
+      <button class="tab" data-target="settings">Settings</button>
+    </nav>
+
+    <script src="app.js"></script>
+  </body>
+</html>
